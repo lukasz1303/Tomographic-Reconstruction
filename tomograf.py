@@ -4,9 +4,13 @@ import matplotlib.pyplot as plt
 from tkinter import *
 from os import listdir
 from os.path import isfile, join
+import time
+import scipy
+import math
+import threading
 
 mean_color_on_img = 1
-
+import matplotlib.pyplot as plt
 
 def bresenham2(x1, y1, x2, y2):
     dx = x2 - x1
@@ -25,7 +29,7 @@ def bresenham2(x1, y1, x2, y2):
         points = []
 
         for i in range(x1, x2):
-            points.append((i, j))
+            points.append([i, j])
             if e >= 0:
                 j += 1
                 e -= dx
@@ -38,7 +42,7 @@ def bresenham2(x1, y1, x2, y2):
         points = []
 
         for i in range(x1, x2):
-            points.append((i, j))
+            points.append([i, j])
             if e >= 0:
                 j -= 1
                 e -= dx
@@ -51,7 +55,7 @@ def bresenham2(x1, y1, x2, y2):
         points = []
 
         for i in range(x1, x2, -1):
-            points.append((i, j))
+            points.append([i, j])
             if e >= 0:
                 j -= 1
                 e += dx
@@ -64,7 +68,7 @@ def bresenham2(x1, y1, x2, y2):
         points = []
 
         for i in range(x1, x2, -1):
-            points.append((i, j))
+            points.append([i, j])
             if e >= 0:
                 j += 1
                 e += dx
@@ -72,26 +76,20 @@ def bresenham2(x1, y1, x2, y2):
             e += dy
 
     if change:
-        points = [(y, x) for x, y in points]
+        points = [[y, x] for x, y in points]
 
     return points
 
 
-def get_color(line, radius, img):
-    result = []
-    for x, y in line:
-        result.append(img[x + radius - 1, y + radius - 1])
-    return np.array(result).mean() / (20 * mean_color_on_img ** 0.6)
-
-
 def calculate_positions(alfa, phi, n, radius):
     positions = []
-    x1 = radius * np.cos(alfa)
-    y1 = radius * np.sin(alfa)
     for i in range(n):
+        deg1 = alfa + phi / 2 - i * phi / (n - 1)
+        x1 = radius * np.cos(deg1) + radius - 1
+        y1 = radius * np.sin(deg1) + radius - 1
         deg = alfa + np.pi - phi / 2 + i * phi / (n - 1)
-        xd = radius * np.cos(deg)
-        yd = radius * np.sin(deg)
+        xd = radius * np.cos(deg) + radius - 1
+        yd = radius * np.sin(deg) + radius - 1
         positions.append([x1, y1, xd, yd])
 
     return positions
@@ -102,6 +100,8 @@ def process(l, n, angle, radius, img, deg):
     sinogram = np.zeros((int(deg * (1 / angle)), n))
     ratio = 1 / angle
     lines = []
+
+    divider = (15 * mean_color_on_img ** 0.7)
     for angle in angles:
         angle_deg = angle
         angle = np.deg2rad(angle)
@@ -110,95 +110,65 @@ def process(l, n, angle, radius, img, deg):
         lines_row = []
         positions = calculate_positions(angle, phi, n, radius)
         for position in positions:
-            line = bresenham2(int(position[0]), int(position[1]), int(position[2]), int(position[3]))
-            color = get_color(line, radius, img)
+            if int(position[0]) == int(position[2]) and int(position[1]) == int(position[3]):
+                line = [[int(position[0]), int(position[1])]]
+            else:
+                line = bresenham2(int(position[0]), int(position[1]), int(position[2]), int(position[3]))
+            line = np.array(line)
+            color = sum(img[line[:, 0], line[:, 1]]) / len(line) / divider
             sin_row.append(color)
             lines_row.append(line)
-        # sinogram.append(sin_row)
         lines.append(lines_row)
         sinogram[int(angle_deg * ratio), :] = sin_row
         winname = "sinogram"
-        cv2.namedWindow(winname)  # Create a named window
-        cv2.moveWindow(winname, 650, 200)  # Move it to (40,30)
         cv2.imshow(winname, sinogram)
         cv2.waitKey(1)
     return np.array(sinogram), lines
-
-
-def draw(img, line, color, radius, n):
-    color = color / (2 * n / 3)
-    for i in line:
-        img[i[0] + radius - 1][i[1] + radius - 1] += color
-    return img
-
-
-def draw2(img, lines, colors, radius, n):
-    # color = color/(2*n/3)
-    c = 0
-    for line in lines:
-        for i in line:
-            if radius * 2 > (i[0] + radius - 1) >= 0 and radius * 2 > (i[1] + radius - 1) >= 0:
-                img[i[0] + radius - 1][i[1] + radius - 1] += colors[c] / (4 * n)
-        c += 1
-    return img
 
 
 def reverse(sinogram, n, angle2, radius, lines, deg):
     img = np.zeros((radius * 2, radius * 2))
     angles = np.arange(0, deg, angle2)
     ratio = 1 / angle2
+    divider = n / 40 / np.mean(sinogram) * ratio
     for angle in angles:
         i = 0
         for line in lines[int(angle * ratio)]:
             color = sinogram[int(angle * ratio)][i]
             i += 1
-            img = draw(img, line, color, radius, n)
+            img[line[:, 0], line[:, 1]] += color / divider
         winname = "reverse"
-        # cv2.namedWindow(winname)  # Create a named window
-        # cv2.moveWindow(winname, 1000, 100)  # Move it to (40,30)
         cv2.imshow(winname, img)
         cv2.waitKey(1)
 
     return img
 
 
-def reverse2(sinogram, n, angle2, radius, lines, deg):
-    img2 = np.zeros((radius * 2, radius * 2))
+def reverse_filtered(sinogram, n, angle2, radius, lines, deg):
+    img = np.zeros((radius * 2, radius * 2))
     angles = np.arange(0, deg, angle2)
     ratio = 1 / angle2
-    p = np.random.permutation(len(angles))
-    angles = angles[p]
+    divider = n / 750 / np.mean(sinogram)**1.8*ratio/2.5
+    for i in range(len(sinogram)):
+        sinogram[i] = np.real(scipy.fft.ifft(scipy.fft.fft((2*sinogram[i])**1.25-0.3) * np.hamming(len(sinogram[i]))))
 
     for angle in angles:
-        ii = 0
+        i = 0
         for line in lines[int(angle * ratio)]:
-            lines2 = []
-
-            for i in range(13):
-                lin = []
-                for c in line:
-                    lin.append((c[0] - 2 + i, c[1] - 2 + i))
-                lines2.append(lin)
-
-            color = sinogram[int(angle * ratio)][ii]
-            ii += 1
-            filtered = [-0.1 + color, -0.2 + color, -0.3 + color, -0.4 + color, -0.6 + color, color, color, color, -0.6 + color,
-                        -0.4 + color, -0.3 + color, -0.2 + color,-0.1 + color]
-            img2 = draw2(img2, lines2, filtered, radius, n)
-
-        winname = "reverse_filtered"
-        # cv2.namedWindow(winname)  # Create a named window
-        # cv2.moveWindow(winname, 1200, 100)  # Move it to (40,30)
-        cv2.imshow(winname, img2)
+            color = sinogram[int(angle * ratio)][i]
+            i += 1
+            img[line[:, 0], line[:, 1]] += color/divider
+        winname = "reverse-filtered"
+        cv2.imshow(winname, img)
         cv2.waitKey(1)
 
-    return img2
+    return img
 
 
-def show(l, n, angle, filtr, both, full):
+def show(l, n, angle, filtr, both):
+    cv2.destroyAllWindows()
     global mean_color_on_img
-    img1 = cv2.imread('tomograf-zdjecia/' + images.get())  # , 0).astype('float64')
-    # width, height = np.shape(img1)
+    img1 = cv2.imread('tomograf-zdjecia/' + images.get())
     s = max(img1.shape[0:2])
     img2 = np.zeros((s, s, 3), np.uint8)
     ax, ay = (s - img1.shape[1]) // 2, (s - img1.shape[0]) // 2
@@ -206,19 +176,44 @@ def show(l, n, angle, filtr, both, full):
     radius = int(s / 2)
     img = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
     mean_color_on_img = np.array(img).mean()
-    if full:
-        deg = 360
-    else:
-        deg = 180
+    deg = 180
 
+    rev_filter = None
+    rev = None
     sino, lines = process(l, n, angle, radius, img, deg)
     if both:
-        reverse(sino, n, angle, radius, lines, deg)
-        reverse2(sino, n, angle, radius, lines, deg)
+        rev = reverse(sino, n, angle, radius, lines, deg)
+        rev_filter = reverse_filtered(sino, n, angle, radius, lines, deg)
     elif filtr:
-        reverse2(sino, n, angle, radius, lines, deg)
+        rev_filter = reverse_filtered(sino, n, angle, radius, lines, deg)
     else:
-        reverse(sino, n, angle, radius, lines, deg)
+        rev = reverse(sino, n, angle, radius, lines, deg)
+
+    cv2.imshow("ORIGINAL", img)
+    cv2.waitKey(1)
+
+    if rev_filter is not None:
+        rev_filter[rev_filter < 0] = 0
+        rev_filter[rev_filter > 1] = 1
+        MSE = 0
+        for i in range(len(rev_filter)):
+            for j in range(len(rev_filter[i])):
+                MSE += (img[i][j]/255 - rev_filter[i][j])**2
+        MSE = MSE / (len(rev_filter) * len(rev_filter[0]))
+        RMSE = MSE**0.5
+        print("RMSE filtered =", RMSE)
+
+    if rev is not None:
+        rev[rev < 0] = 0
+        rev[rev > 1] = 1
+        MSE = 0
+        for i in range(len(rev)):
+            for j in range(len(rev[i])):
+                MSE += (img[i][j]/255 - rev[i][j])**2
+        MSE = MSE / (len(rev) * len(rev[0]))
+        RMSE = MSE**0.5
+        print("RMSE =", RMSE)
+
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
@@ -240,7 +235,7 @@ if __name__ == '__main__':
     n_label = Label(app, text="n", font='serif').place(x=100, y=200)
     angle_label = Label(app, text="angle", font='serif').place(x=80, y=250)
     l_entry = Entry(app, bd=5)
-    l_entry.insert(0, "270")
+    l_entry.insert(0, "180")
     l_entry.place(x=150, y=150)
     n_entry = Entry(app, bd=5)
     n_entry.insert(0, "150")
@@ -253,14 +248,10 @@ if __name__ == '__main__':
     full = IntVar()
     c1 = Checkbutton(app, text='Filtr', variable=filtr, onvalue=1, offvalue=0)
     c1.pack()
-    c1.place(x=100, y=350)
+    c1.place(x=140, y=350)
     c2 = Checkbutton(app, text='Oba', variable=both, onvalue=1, offvalue=0)
     c2.pack()
-    c2.place(x=180, y=350)
-    c3 = Checkbutton(app, text='360°', variable=full, onvalue=1, offvalue=0)
-    c3.pack()
-    c3.place(x=260, y=350)
-    a = Button(app, command=lambda: show(int(l_entry.get()), int(n_entry.get()), float(angle_entry.get()), filtr.get(), both.get(), full.get()),
+    c2.place(x=220, y=350)
+    a = Button(app, command=lambda: threading.Thread(target=lambda: show(int(l_entry.get()), int(n_entry.get()), float(angle_entry.get()), filtr.get(), both.get())).start(),
                text="Show results", height=1, width=28).place(x=100, y=300)
-
     app.mainloop()

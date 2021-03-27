@@ -2,15 +2,120 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 from tkinter import *
+from tkinter import messagebox as msb
 from os import listdir
 from os.path import isfile, join
 import time
 import scipy
 import math
 import threading
+import pydicom
+import datetime
+from pydicom import charset
+from pydicom.dataset import Dataset, FileDataset, FileMetaDataset
+from pydicom.data import get_testdata_file
+
+import pydicom._storage_sopclass_uids
 
 mean_color_on_img = 1
 import matplotlib.pyplot as plt
+
+def input_data(img):
+    win = Toplevel()
+
+    win.resizable(False, False)
+    win.geometry("400x400")
+    win.title("Dane")
+
+    name_label = Label(win, text="Imie", font='serif').place(x=20, y=50)
+    surname_label = Label(win, text="Nazwisko", font='serif').place(x=20, y=100)
+    id_label = Label(win, text="ID", font='serif').place(x=20, y=150)
+    date_label = Label(win, text="Data", font='serif').place(x=20, y=200)
+    comment_label = Label(win, text="Komentarz", font='serif').place(x=20, y=250)
+    filename_label = Label(win, text="Nazwa pliku", font='serif').place(x=20, y=300)
+    name_entry = Entry(win, bd=5)
+    name_entry.insert(0, "Mateusz")
+    name_entry.place(x=150, y=50)
+    surname_entry = Entry(win, bd=5)
+    surname_entry.insert(0, "Zelazowski")
+    surname_entry.place(x=150, y=100)
+    id_entry = Entry(win, bd=5)
+    id_entry.insert(0, "10")
+    id_entry.place(x=150, y=150)
+    date_entry = Entry(win, bd=5)
+    date_entry.insert(0, "30.03.2021")
+    date_entry.place(x=150, y=200)
+    comment_entry = Entry(win, bd=5)
+    comment_entry.insert(0, "Standardowy komentarz")
+    comment_entry.place(x=150, y=250)
+    filename_entry = Entry(win, bd=5)
+    filename_entry.insert(0, "out")
+    filename_entry.place(x=150, y=300)
+    save = Button(win, command=lambda: threading.Thread(target=lambda:  save_dicom(img, name_entry.get(), surname_entry.get(), id_entry.get(),date_entry.get(), comment_entry.get(), filename_entry.get(),win)
+                                                     ).start(),text="Save", height=1, width=25).place(x=200, y=350)
+    close = Button(win, command=lambda: threading.Thread(target=lambda: win.destroy()
+        ).start(), text="Close", height=1, width=25).place(x=10, y=350)
+
+def save_dicom(img, name, surname, id, date, comment, filename,win):
+    win.destroy()
+    img = img*255
+    img = img.astype(np.uint16)
+    if filename[-4:] == ".dcm":
+        full_filename = filename
+    elif filename == "":
+        full_filename = "name.dcm"
+    else:
+        sufix = ".dcm"
+        full_filename = filename + sufix
+
+    file_meta = Dataset()
+    file_meta.MediaStorageSOPClassUID = pydicom._storage_sopclass_uids.MRImageStorage
+    file_meta.MediaStorageSOPInstanceUID = pydicom.uid.generate_uid()
+    file_meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian
+
+    ds = FileDataset(filename, {}, file_meta=file_meta, preamble=b"\0" * 128)
+    if name == "" and surname == "":
+        full_name = "name^surname"
+    else:
+        full_name = name + "^" + surname
+    ds.PatientName = full_name
+    if id == "":
+        id = "1"
+    ds.PatientID = id
+    if comment != "":
+        ds.ImageComments = comment
+    if date != "":
+        ds.ContentDate = date
+    else:
+        dt = datetime.datetime.now()
+        ds.ContentDate = dt.strftime('%Y%m%d')
+
+    ds.SOPClassUID = pydicom._storage_sopclass_uids.MRImageStorage
+    ds.SamplesPerPixel = 1
+    ds.PhotometricInterpretation = "MONOCHROME2"
+    ds.PixelRepresentation = 0
+    ds.HighBit = 15
+    ds.BitsStored = 16
+    ds.BitsAllocated = 16
+    ds.Columns = img.shape[1]
+    ds.Rows = img.shape[0]
+    ds.ImagePositionPatient = r"0\0\1"
+    ds.ImageOrientationPatient = r"1\0\0\0\-1\0"
+    ds.ImageType = r"ORIGINAL\PRIMARY\AXIAL"
+    ds.RescaleIntercept = "0"
+    ds.RescaleSlope = "1"
+    ds.PixelSpacing = r"1\1"
+    ds.Modality = "CT"
+    ds.SeriesInstanceUID = pydicom.uid.generate_uid()
+    ds.StudyInstanceUID = pydicom.uid.generate_uid()
+    ds.FrameOfReferenceUID = pydicom.uid.generate_uid()
+    ds.is_little_endian = True
+    ds.is_implicit_VR = False
+
+    pydicom.dataset.validate_file_meta(ds.file_meta, enforce_standard=True)
+    ds.PixelData = img.tobytes()
+    ds.save_as('tomograf-zdjecia/' + full_filename, write_like_original=False)
+
 
 def bresenham2(x1, y1, x2, y2):
     dx = x2 - x1
@@ -168,13 +273,23 @@ def reverse_filtered(sinogram, n, angle2, radius, lines, deg):
 def show(l, n, angle, filtr, both):
     cv2.destroyAllWindows()
     global mean_color_on_img
-    img1 = cv2.imread('tomograf-zdjecia/' + images.get())
-    s = max(img1.shape[0:2])
-    img2 = np.zeros((s, s, 3), np.uint8)
-    ax, ay = (s - img1.shape[1]) // 2, (s - img1.shape[0]) // 2
-    img2[ay:img1.shape[0] + ay, ax:ax + img1.shape[1]] = img1
+    file = images.get()
+
+    if file[-4:] == ".dcm":
+        img1 = pydicom.dcmread('tomograf-zdjecia/' + file)
+        s = max(img1.pixel_array.shape)
+        img2 = np.zeros((s, s), np.uint8)
+        ax, ay = (s - img1.pixel_array.shape[1]) // 2, (s - img1.pixel_array.shape[0]) // 2
+        img2[ay:img1.pixel_array.shape[0] + ay, ax:ax + img1.pixel_array.shape[1]] = img1.pixel_array
+    else:
+        img1 = cv2.imread('tomograf-zdjecia/' + file,0).astype('float64')
+        s = max(img1.shape[0:2])
+        img2 = np.zeros((s, s), np.uint8)
+        ax, ay = (s - img1.shape[1]) // 2, (s - img1.shape[0]) // 2
+        img2[ay:img1.shape[0] + ay, ax:ax + img1.shape[1]] = img1
+    img = img2
+    #img = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
     radius = int(s / 2)
-    img = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
     mean_color_on_img = np.array(img).mean()
     deg = 180
 
@@ -213,17 +328,16 @@ def show(l, n, angle, filtr, both):
         MSE = MSE / (len(rev) * len(rev[0]))
         RMSE = MSE**0.5
         print("RMSE =", RMSE)
-
+    input_data(rev_filter)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
-
 
 if __name__ == '__main__':
     app = Tk()
     app.resizable(False, False)
     app.geometry("400x400")
     app.title("Tomograf")
-    name = Label(app, text="Tomograf", font=('serif', 20)).place(x=130, y=50)
+    name = Label(app, text="Tomograf", font=('serif', 20)).place(x=130, y=20)
     images = StringVar(app)
     files = [f for f in listdir("tomograf-zdjecia") if isfile(join("tomograf-zdjecia", f))]
     images_names = files
@@ -252,6 +366,6 @@ if __name__ == '__main__':
     c2 = Checkbutton(app, text='Oba', variable=both, onvalue=1, offvalue=0)
     c2.pack()
     c2.place(x=220, y=350)
-    a = Button(app, command=lambda: threading.Thread(target=lambda: show(int(l_entry.get()), int(n_entry.get()), float(angle_entry.get()), filtr.get(), both.get())).start(),
+    start = Button(app, command=lambda: threading.Thread(target=lambda: show(int(l_entry.get()), int(n_entry.get()), float(angle_entry.get()), filtr.get(), both.get())).start(),
                text="Show results", height=1, width=28).place(x=100, y=300)
     app.mainloop()

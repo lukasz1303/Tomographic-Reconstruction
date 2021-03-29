@@ -1,21 +1,19 @@
 import cv2
 import numpy as np
 from tkinter import *
-from tkinter import messagebox as msb
 from os import listdir
 from os.path import isfile, join
 import scipy
 import threading
 import pydicom
 import datetime
-from pydicom import charset
-from pydicom.dataset import Dataset, FileDataset, FileMetaDataset
-from pydicom.data import get_testdata_file
+from pydicom.dataset import Dataset, FileDataset
 from pathlib import Path
 
 import pydicom._storage_sopclass_uids
 
 mean_color_on_img = 1
+
 
 def input_data(img):
     win = Toplevel()
@@ -48,14 +46,17 @@ def input_data(img):
     filename_entry = Entry(win, bd=5)
     filename_entry.insert(0, "out")
     filename_entry.place(x=150, y=300)
-    save = Button(win, command=lambda: threading.Thread(target=lambda:  save_dicom(img, name_entry.get(), surname_entry.get(), id_entry.get(),date_entry.get(), comment_entry.get(), filename_entry.get(),win)
-                                                     ).start(),text="Save", height=1, width=25).place(x=200, y=350)
+    save = Button(win, command=lambda: threading.Thread(
+        target=lambda: save_dicom(img, name_entry.get(), surname_entry.get(), id_entry.get(), date_entry.get(),
+                                  comment_entry.get(), filename_entry.get(), win)
+        ).start(), text="Save", height=1, width=25).place(x=200, y=350)
     close = Button(win, command=lambda: threading.Thread(target=lambda: win.destroy()
-        ).start(), text="Close", height=1, width=25).place(x=10, y=350)
+                                                         ).start(), text="Close", height=1, width=25).place(x=10, y=350)
 
-def save_dicom(img, name, surname, id, date, comment, filename,win):
+
+def save_dicom(img, name, surname, id, date, comment, filename, win):
     win.destroy()
-    img = img*255
+    img = img * 255
     img = img.astype(np.uint16)
     if filename[-4:] == ".dcm":
         full_filename = filename
@@ -200,7 +201,7 @@ def calculate_positions(alfa, phi, n, radius):
 
 def draw_sinogram(l, n, angle, radius, img, deg, with_steps):
     angles = np.arange(0, deg, angle)
-    sinogram = np.zeros((int(deg * (1 / angle)), n))
+    sinogram = np.zeros((int(round(deg * (1 / angle))), n))
     ratio = 1 / angle
     lines = []
 
@@ -234,7 +235,7 @@ def reverse(l, sinogram, n, angle2, radius, lines, deg, with_steps):
     img = np.zeros((radius * 2, radius * 2))
     angles = np.arange(0, deg, angle2)
     ratio = 1 / angle2
-    divider = n / 40 / np.mean(sinogram) * ratio *(180/l)**2
+    divider = n / 40 / np.mean(sinogram) * ratio * (180 / l) ** 2
     for angle in angles:
         i = 0
         for line in lines[int(angle * ratio)]:
@@ -253,16 +254,17 @@ def reverse_filtered(l, sinogram, n, angle2, radius, lines, deg, with_steps):
     img = np.zeros((radius * 2, radius * 2))
     angles = np.arange(0, deg, angle2)
     ratio = 1 / angle2
-    divider = n / 750 / np.mean(sinogram)**1.8*ratio/2.5 *(180/l)**2
+    divider = n / 750 / np.mean(sinogram) ** 1.8 * ratio / 2.5 * (180 / l) ** 2
     for i in range(len(sinogram)):
-        sinogram[i] = np.real(scipy.fft.ifft(scipy.fft.fft((2*sinogram[i])**1.25-0.3) * np.hamming(len(sinogram[i]))))
+        sinogram[i] = np.real(scipy.fft.ifft(scipy.fft.fft((2 * sinogram[i]) ** 1.25 - 0.3)
+                                             * np.hamming(len(sinogram[i]))))
 
     for angle in angles:
         i = 0
         for line in lines[int(angle * ratio)]:
             color = sinogram[int(angle * ratio)][i]
             i += 1
-            img[line[:, 0], line[:, 1]] += color/divider
+            img[line[:, 0], line[:, 1]] += color / divider
         if with_steps:
             winname = "reverse-filtered"
             cv2.imshow(winname, img)
@@ -286,7 +288,7 @@ def show(l, n, angle, filtr, both, with_steps):
         ax, ay = (s - img1.pixel_array.shape[1]) // 2, (s - img1.pixel_array.shape[0]) // 2
         img2[ay:img1.pixel_array.shape[0] + ay, ax:ax + img1.pixel_array.shape[1]] = img1.pixel_array
     else:
-        img1 = cv2.imread('tomograf-zdjecia/' + file,0).astype('float64')
+        img1 = cv2.imread('tomograf-zdjecia/' + file, 0).astype('float64')
         s = max(img1.shape[0:2])
         img2 = np.zeros((s, s), np.uint8)
         ax, ay = (s - img1.shape[1]) // 2, (s - img1.shape[0]) // 2
@@ -322,7 +324,6 @@ def show(l, n, angle, filtr, both, with_steps):
             cv2.imshow(winname, rev_filter)
             cv2.waitKey(1)
 
-
     cv2.imshow("Obraz oryginalny", img)
     cv2.waitKey(1)
 
@@ -334,9 +335,9 @@ def show(l, n, angle, filtr, both, with_steps):
         MSE = 0
         for i in range(len(rev_filter)):
             for j in range(len(rev_filter[i])):
-                MSE += (img[i][j] - rev_filter[i][j]*255)**2
+                MSE += (img[i][j] - rev_filter[i][j] * 255) ** 2
         MSE = MSE / (len(rev_filter) * len(rev_filter[0]))
-        RMSE = MSE**0.5
+        RMSE = MSE ** 0.5
         print("RMSE filtered =", RMSE)
 
     if rev is not None:
@@ -345,9 +346,9 @@ def show(l, n, angle, filtr, both, with_steps):
         MSE = 0
         for i in range(len(rev)):
             for j in range(len(rev[i])):
-                MSE += (img[i][j] - rev[i][j]*255)**2
+                MSE += (img[i][j] - rev[i][j] * 255) ** 2
         MSE = MSE / (len(rev) * len(rev[0]))
-        RMSE = MSE**0.5
+        RMSE = MSE ** 0.5
         print("RMSE =", RMSE)
     if rev_filter is not None:
         input_data(rev_filter)
@@ -376,13 +377,13 @@ if __name__ == '__main__':
     angle_label = Label(app, text="Krok ∆α:", font='serif').place(x=20, y=250)
     l_entry = Entry(app, bd=5)
     l_entry.insert(0, "180")
-    l_entry.place(x=200, y=150)
+    l_entry.place(x=225, y=150)
     n_entry = Entry(app, bd=5)
     n_entry.insert(0, "150")
-    n_entry.place(x=200, y=200)
+    n_entry.place(x=225, y=200)
     angle_entry = Entry(app, bd=5)
     angle_entry.insert(0, "1")
-    angle_entry.place(x=200, y=250)
+    angle_entry.place(x=225, y=250)
     filtr = IntVar()
     both = IntVar()
     with_steps = IntVar()
@@ -395,6 +396,8 @@ if __name__ == '__main__':
     c3 = Checkbutton(app, text='Z pokazywaniem kroków', variable=with_steps, onvalue=1, offvalue=0)
     c3.pack()
     c3.place(x=50, y=420)
-    start = Button(app, command=lambda: threading.Thread(target=lambda: show(int(l_entry.get()), int(n_entry.get()), float(angle_entry.get()), filtr.get(), both.get(), with_steps.get())).start(),
-               text="Show results", height=1, width=28).place(x=95, y=300)
+    start = Button(app, command=lambda: threading.Thread(
+        target=lambda: show(int(l_entry.get()), int(n_entry.get()), float(angle_entry.get()), filtr.get(), both.get(),
+                            with_steps.get())).start(),
+                   text="Show results", height=1, width=28).place(x=95, y=300)
     app.mainloop()
